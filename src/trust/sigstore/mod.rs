@@ -44,6 +44,16 @@ pub struct SigstoreTrustRoot {
     trusted_root: TrustedRoot,
 }
 
+pub enum TargetType {
+    Authority(CertificateAuthority),
+    Log(TransparencyLogInstance),
+}
+pub enum Target {
+    CertificateAuthority,
+    TimestampAuthority,
+    Ctlog,
+    Tlog,
+}
 impl SigstoreTrustRoot {
     /// Constructs a new trust root from a [`tough::Repository`].
     async fn from_tough(
@@ -155,6 +165,171 @@ impl SigstoreTrustRoot {
             .flat_map(|chain| chain.certificates.iter())
             .map(|cert| cert.raw_bytes.as_slice())
     }
+
+    // Add a new target in the TrustedRoot
+    pub fn add_target(&mut self, new_target: TargetType, target_name: Target) -> Result<()> {
+        match target_name {
+            Target::CertificateAuthority => {
+                if let TargetType::Authority(ca) = new_target {
+                    // Expire the last entry if it doesn't have an `end` value
+                    if let Some(last_ca) = self.trusted_root.certificate_authorities.last_mut() {
+                        if let Some(valid_for) = &mut last_ca.valid_for {
+                            if valid_for.end.is_none() {
+                                valid_for.end = ca.valid_for.clone().unwrap().start;
+                            }
+                        }
+                    }
+                    self.trusted_root.certificate_authorities.push(ca);
+                } else {
+                    return Err(SigstoreError::UnexpectedError(
+                        "Expected a CertificateAuthority, but got a different target.".to_string(),
+                    ));
+                }
+            }
+            Target::TimestampAuthority => {
+                if let TargetType::Authority(tsa) = new_target {
+                    if let Some(last_tsa) = self.trusted_root.timestamp_authorities.last_mut() {
+                        if let Some(valid_for) = &mut last_tsa.valid_for {
+                            if valid_for.end.is_none() {
+                                valid_for.end = tsa.valid_for.clone().unwrap().start;
+                            }
+                        }
+                    }
+                    self.trusted_root.timestamp_authorities.push(tsa);
+                } else {
+                    return Err(SigstoreError::UnexpectedError(
+                        "Expected a TimestampAuthority, but got a different target.".to_string(),
+                    ));
+                }
+            }
+            Target::Ctlog => {
+                if let TargetType::Log(ctlog) = new_target {
+                    if let Some(last_ctlog) = self.trusted_root.ctlogs.last_mut() {
+                        if let Some(valid_for) = last_ctlog
+                            .public_key
+                            .as_mut()
+                            .and_then(|pk| pk.valid_for.as_mut())
+                        {
+                            if valid_for.end.is_none() {
+                                valid_for.end = ctlog
+                                    .clone()
+                                    .public_key
+                                    .unwrap()
+                                    .valid_for
+                                    .clone()
+                                    .unwrap()
+                                    .start;
+                            }
+                        }
+                    }
+                    self.trusted_root.ctlogs.push(ctlog);
+                } else {
+                    return Err(SigstoreError::UnexpectedError(
+                        "Expected a Ctlog, but got a different target.".to_string(),
+                    ));
+                }
+            }
+            Target::Tlog => {
+                if let TargetType::Log(tlog) = new_target {
+                    if let Some(last_tlog) = self.trusted_root.tlogs.last_mut() {
+                        if let Some(valid_for) = last_tlog
+                            .public_key
+                            .as_mut()
+                            .and_then(|pk| pk.valid_for.as_mut())
+                        {
+                            if valid_for.end.is_none() {
+                                valid_for.end = tlog
+                                    .clone()
+                                    .public_key
+                                    .unwrap()
+                                    .valid_for
+                                    .clone()
+                                    .unwrap()
+                                    .start;
+                            }
+                        }
+                    }
+                    self.trusted_root.tlogs.push(tlog);
+                } else {
+                    return Err(SigstoreError::UnexpectedError(
+                        "Expected a Tlog, but got a different target.".to_string(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    // Update a target in the TrustedRoot
+    pub fn update_target(&mut self, target: TargetType, target_name: Target) -> Result<()> {
+        match target_name {
+            Target::CertificateAuthority => {
+                if let TargetType::Authority(new_ca) = target {
+                    if let Some(existing_ca) = self
+                        .trusted_root
+                        .certificate_authorities
+                        .iter_mut()
+                        .find(|ca| ca.cert_chain == new_ca.cert_chain)
+                    {
+                        existing_ca.clone_from(&new_ca);
+                    }
+                } else {
+                    return Err(SigstoreError::UnexpectedError(
+                        "Expected a CertificateAuthority, but got a different target.".to_string(),
+                    ));
+                }
+            }
+            Target::TimestampAuthority => {
+                if let TargetType::Authority(new_tsa) = target {
+                    if let Some(existing_tsa) = self
+                        .trusted_root
+                        .timestamp_authorities
+                        .iter_mut()
+                        .find(|tsa| tsa.cert_chain == new_tsa.cert_chain)
+                    {
+                        existing_tsa.clone_from(&new_tsa);
+                    }
+                } else {
+                    return Err(SigstoreError::UnexpectedError(
+                        "Expected a TimestampAuthority, but got a different target.".to_string(),
+                    ));
+                }
+            }
+            Target::Ctlog => {
+                if let TargetType::Log(new_ctlog) = target {
+                    if let Some(existing_ctlog) = self
+                        .trusted_root
+                        .ctlogs
+                        .iter_mut()
+                        .find(|ctlog| ctlog.log_id == new_ctlog.log_id)
+                    {
+                        existing_ctlog.clone_from(&new_ctlog);
+                    }
+                } else {
+                    return Err(SigstoreError::UnexpectedError(
+                        "Expected a Ctlog, but got a different target.".to_string(),
+                    ));
+                }
+            }
+            Target::Tlog => {
+                if let TargetType::Log(new_tlog) = target {
+                    if let Some(existing_tlog) = self
+                        .trusted_root
+                        .tlogs
+                        .iter_mut()
+                        .find(|tlog| tlog.log_id == new_tlog.log_id)
+                    {
+                        existing_tlog.clone_from(&new_tlog);
+                    }
+                } else {
+                    return Err(SigstoreError::UnexpectedError(
+                        "Expected a Tlog, but got a different target.".to_string(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 impl crate::trust::TrustRoot for SigstoreTrustRoot {
@@ -238,7 +413,14 @@ fn is_timerange_valid(range: Option<&TimeRange>, allow_expired: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use prost_types::Timestamp;
     use rstest::{fixture, rstest};
+    use sigstore_protobuf_specs::dev::sigstore::{
+        common::v1::{
+            DistinguishedName, LogId, PublicKey, TimeRange, X509Certificate, X509CertificateChain,
+        },
+        trustroot::v1::{CertificateAuthority, TransparencyLogInstance},
+    };
     use std::fs;
     use std::path::Path;
     use std::time::SystemTime;
@@ -331,5 +513,179 @@ mod tests {
         assert!(!is_timerange_valid(Some(&range_from(-1, -1)), false));
         // Valid: 1 ago, 1 ago
         assert!(is_timerange_valid(Some(&range_from(-1, -1)), true))
+    }
+
+    #[tokio::test]
+    async fn test_add_new_certificate_authority() {
+        let cache_dir = None;
+        let mut trust_root = SigstoreTrustRoot::new(cache_dir)
+            .await
+            .expect("Failed to create SigstoreTrustRoot");
+        let initial_length = trust_root.trusted_root.certificate_authorities.len();
+        let new_ca = CertificateAuthority {
+            subject: Some(DistinguishedName {
+                organization: "sigstore.dev".to_string(),
+                common_name: "sigstore".to_string(),
+            }),
+            uri: "https://fulcio_test.sigstore.dev".to_string(),
+            cert_chain: Some(X509CertificateChain {
+                certificates: vec![
+                    X509Certificate {
+                        raw_bytes: String::from("MIIB+DCCAX6gAwIBAgITNVkDZoCiofPDsy7dfm6geLguhzAKBggqhkjOPQQDAzAqMRUwEwYDVQEKEwxzaWdzdG9yZS5kZXYxETAPBgNVBAMTCHNpZ3N0b3JlMB4XDTIxMDMwNzAzMjAyOVoXDTMxMDIyMzAzMjAyOVowKjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTB2MBAGByqGSM49AgEGBSuBBAAiA2IABLSyA7Ii5k+pNO8ZEWY0ylemWDowOkNa3kL+GZE5Z5GWehL9/A9bRNA3RbrsZ5i0JcastaRL7Sp5fp/jD5dxqc/UdTVnlvS16an+2Yfswe/QuLolRUCrcOE2+2iA5+tzd6NmMGQwDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB/wQIMAYBAf8CAQEwHQYDVR0OBBYEFMjFHQBBmiQpMlEk6w2uSu1KBtPsMB8GA1UdIwQYMBaAFMjFHQBBmiQpMlEk6w2uSu1KBtPsMAoGCCqGSM49BAMDA2gAMGUCMH8liWJfMui6vXXBhjDgY4MwslmN/TJxVe/83WrFomwmNf056y1X48F9c4m3a3ozXAIxAKjRay5/aj/jsKKGIkmQatjI8uupHr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==").as_bytes().to_vec(),
+                    },
+                ],
+            }),
+            valid_for: Some(TimeRange{
+                start: Some(Timestamp{
+                    seconds: 1724155691,
+                    nanos: 0,
+                }),
+                end: None,
+            }),
+        };
+        let result =
+            trust_root.add_target(TargetType::Authority(new_ca), Target::CertificateAuthority);
+        assert!(result.is_ok(), "Failed to add new certificate authority");
+        let new_length = trust_root.trusted_root.certificate_authorities.len();
+        assert_eq!(
+            trust_root.trusted_root.certificate_authorities.len(),
+            initial_length + 1
+        );
+
+        let added_ca = &trust_root.trusted_root.certificate_authorities[new_length - 1];
+        assert_eq!(added_ca.uri, "https://fulcio_test.sigstore.dev");
+        assert_eq!(
+            added_ca.valid_for.as_ref().unwrap().start,
+            Some(Timestamp {
+                seconds: 1724155691,
+                nanos: 0,
+            })
+        );
+        // Check expired certificate authority
+        if initial_length > 0 {
+            assert_eq!(
+                trust_root.trusted_root.certificate_authorities[new_length - 2]
+                    .valid_for
+                    .as_ref()
+                    .unwrap()
+                    .end,
+                Some(Timestamp {
+                    seconds: 1724155691,
+                    nanos: 0,
+                })
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_update_certificate_authority() {
+        let cache_dir = None;
+        let mut trust_root = SigstoreTrustRoot::new(cache_dir)
+            .await
+            .expect("Failed to create SigstoreTrustRoot");
+        let initial_length = trust_root.trusted_root.certificate_authorities.len();
+
+        // Update the last certificate authority
+        let ca = &trust_root.trusted_root.certificate_authorities[initial_length - 1];
+        let mut updated_ca = ca.clone();
+        updated_ca.subject = Some(DistinguishedName {
+            organization: "sigstore.test".to_string(),
+            common_name: "sigstore".to_string(),
+        });
+        updated_ca.valid_for = Some(TimeRange {
+            start: Some(Timestamp {
+                seconds: 1724155691,
+                nanos: 0,
+            }),
+            end: None,
+        });
+        let result = trust_root.update_target(
+            TargetType::Authority(updated_ca),
+            Target::CertificateAuthority,
+        );
+        let new_length = trust_root.trusted_root.certificate_authorities.len();
+        let ca = &trust_root.trusted_root.certificate_authorities[new_length - 1];
+        assert!(result.is_ok(), "Failed to update certificate authority");
+        assert_eq!(
+            ca.subject,
+            Some(DistinguishedName {
+                organization: "sigstore.test".to_string(),
+                common_name: "sigstore".to_string(),
+            })
+        );
+        assert_eq!(
+            ca.valid_for.as_ref().unwrap().start,
+            Some(Timestamp {
+                seconds: 1724155691,
+                nanos: 0,
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn test_add_new_ctlog() {
+        let cache_dir = None;
+        let mut trust_root = SigstoreTrustRoot::new(cache_dir)
+            .await
+            .expect("Failed to create SigstoreTrustRoot");
+        let initial_length = trust_root.trusted_root.ctlogs.len();
+        let new_ctlog = TransparencyLogInstance {
+            base_url: String::from("https://ctfe.sigstore.dev/test"),
+            hash_algorithm: 256,
+            public_key: Some(PublicKey{
+                raw_bytes: Some(String::from("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbfwR+RJudXscgRBRpKX1XFDy3PyudDxz/SfnRi1fT8ekpfBd2O1uoz7jr3Z8nKzxA69EUQ+eFCFI3zeubPWU7w==").as_bytes().to_vec()),
+                key_details: 256,
+                valid_for: Some(TimeRange{
+                    start: Some(Timestamp{
+                        seconds: 1724155691,
+                        nanos: 0,
+                    }),
+                    end: None,
+                }),
+            }),
+            log_id: Some(LogId {
+                key_id: String::from("CGCS8RhS/2hG0drJ4ScRWcYrBY9wzjSbea8IgY2b3I=").as_bytes().to_vec(),
+            }),
+            checkpoint_key_id: None,
+        };
+
+        let result = trust_root.add_target(TargetType::Log(new_ctlog), Target::Ctlog);
+        assert!(result.is_ok(), "Failed to add new CT log entry");
+        let new_length = trust_root.trusted_root.ctlogs.len();
+        assert_eq!(trust_root.trusted_root.ctlogs.len(), initial_length + 1);
+
+        let added_ctlog: &TransparencyLogInstance = &trust_root.trusted_root.ctlogs[new_length - 1];
+        assert_eq!(added_ctlog.base_url, "https://ctfe.sigstore.dev/test");
+        assert_eq!(
+            added_ctlog
+                .clone()
+                .public_key
+                .unwrap()
+                .valid_for
+                .as_ref()
+                .unwrap()
+                .start,
+            Some(Timestamp {
+                seconds: 1724155691,
+                nanos: 0,
+            })
+        );
+        // Check expired ctlog
+        if initial_length > 0 {
+            assert_eq!(
+                trust_root.trusted_root.ctlogs[new_length - 2]
+                    .clone()
+                    .public_key
+                    .unwrap()
+                    .valid_for
+                    .as_ref()
+                    .unwrap()
+                    .end,
+                Some(Timestamp {
+                    seconds: 1724155691,
+                    nanos: 0,
+                })
+            );
+        }
     }
 }
