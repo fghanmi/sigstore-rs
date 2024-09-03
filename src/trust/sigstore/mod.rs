@@ -330,6 +330,49 @@ impl SigstoreTrustRoot {
         }
         Ok(())
     }
+
+    // Delete a target from the TrustedRoot by its identifier raw bytes:
+    // public key for tlogs and ctlogs, cert chain for certificate and timestamp authorities)
+    pub fn delete_target(&mut self, target_type: Target, identifier: &Vec<u8>) -> Result<()> {
+        match target_type {
+            Target::CertificateAuthority => {
+                self.trusted_root.certificate_authorities.retain(|ca| {
+                    ca.cert_chain.as_ref().map_or(true, |chain| {
+                        chain
+                            .certificates
+                            .iter()
+                            .any(|cert| cert.raw_bytes != *identifier)
+                    })
+                });
+            }
+            Target::TimestampAuthority => {
+                self.trusted_root.timestamp_authorities.retain(|tsa| {
+                    tsa.cert_chain.as_ref().map_or(true, |chain| {
+                        chain
+                            .certificates
+                            .iter()
+                            .any(|cert| cert.raw_bytes != *identifier)
+                    })
+                });
+            }
+            Target::Ctlog => {
+                self.trusted_root.ctlogs.retain(|ctlog| {
+                    ctlog
+                        .public_key
+                        .as_ref()
+                        .map_or(true, |key| key.raw_bytes != Some(identifier.clone()))
+                });
+            }
+            Target::Tlog => {
+                self.trusted_root.tlogs.retain(|tlog| {
+                    tlog.public_key
+                        .as_ref()
+                        .map_or(true, |key| key.raw_bytes != Some(identifier.clone()))
+                });
+            }
+        }
+        Ok(())
+    }
 }
 
 impl crate::trust::TrustRoot for SigstoreTrustRoot {
@@ -650,7 +693,7 @@ mod tests {
         };
 
         let result = trust_root.add_target(TargetType::Log(new_ctlog), Target::Ctlog);
-        assert!(result.is_ok(), "Failed to add new CT log entry");
+        assert!(result.is_ok(), "Failed to add new Ctlog entry");
         let new_length = trust_root.trusted_root.ctlogs.len();
         assert_eq!(trust_root.trusted_root.ctlogs.len(), initial_length + 1);
 
@@ -687,5 +730,144 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_delete_certificate_authority() {
+        let cache_dir = None;
+        let mut trust_root = SigstoreTrustRoot::new(cache_dir)
+            .await
+            .expect("Failed to create SigstoreTrustRoot");
+
+        // Add a new CertificateAuthority
+        let cert_raw_bytes = String::from("MIIB+DCCAX6gAwIBAgITNVkDZoCiofPDsy7dfm6geLguhzAKBggqhkjOPQQDAzAqMRUwEwYDVQEKEwxzaWdzdG9yZS5kZXYxETAPBgNVBAMTCHNpZ3N0b3JlMB4XDTIxMDMwNzAzMjAyOVoXDTMxMDIyMzAzMjAyOVowKjEVMBMGA1UEChMMc2lnc3RvcmUuZGV2MREwDwYDVQQDEwhzaWdzdG9yZTB2MBAGByqGSM49AgEGBSuBBAAiA2IABLSyA7Ii5k+pNO8ZEWY0ylemWDowOkNa3kL+GZE5Z5GWehL9/A9bRNA3RbrsZ5i0JcastaRL7Sp5fp/jD5dxqc/UdTVnlvS16an+2Yfswe/QuLolRUCrcOE2+2iA5+tzd6NmMGQwDgYDVR0PAQH/BAQDAgEGMBIGA1UdEwEB/wQIMAYBAf8CAQEwHQYDVR0OBBYEFMjFHQBBmiQpMlEk6w2uSu1KBtPsMB8GA1UdIwQYMBaAFMjFHQBBmiQpMlEk6w2uSu1KBtPsMAoGCCqGSM49BAMDA2gAMGUCMH8liWJfMui6vXXBhjDgY4MwslmN/TJxVe/83WrFomwmNf056y1X48F9c4m3a3ozXAIxAKjRay5/aj/jsKKGIkmQatjI8uupHr/+CxFvaJWmpYqNkLDGRU+9orzh5hI2RrcuaQ==").as_bytes().to_vec();
+        let new_ca = CertificateAuthority {
+            subject: Some(DistinguishedName {
+                organization: "sigstore.dev".to_string(),
+                common_name: "sigstore".to_string(),
+            }),
+            uri: "https://fulcio_test.sigstore.dev".to_string(),
+            cert_chain: Some(X509CertificateChain {
+                certificates: vec![X509Certificate {
+                    raw_bytes: cert_raw_bytes.clone(),
+                }],
+            }),
+            valid_for: Some(TimeRange {
+                start: Some(Timestamp {
+                    seconds: 1724155691,
+                    nanos: 0,
+                }),
+                end: None,
+            }),
+        };
+        let result =
+            trust_root.add_target(TargetType::Authority(new_ca), Target::CertificateAuthority);
+        assert!(result.is_ok(), "Failed to add new certificate authority");
+
+        let cert_chain = X509Certificate {
+            raw_bytes: cert_raw_bytes,
+        };
+        assert!(
+            trust_root
+                .trusted_root
+                .certificate_authorities
+                .iter()
+                .any(|ca| {
+                    ca.cert_chain
+                        .as_ref()
+                        .map_or(false, |chain| chain.certificates.contains(&cert_chain))
+                }),
+            "Certificate authority not found before deletion"
+        );
+
+        // Delete the CertificateAuthority by cert_chain
+        let result = trust_root.delete_target(Target::CertificateAuthority, &cert_chain.raw_bytes);
+        assert!(result.is_ok(), "Failed to delete the certificate authority");
+
+        // Verify the CertificateAuthority was deleted
+        assert!(
+            !trust_root
+                .trusted_root
+                .certificate_authorities
+                .iter()
+                .any(|ca| {
+                    ca.cert_chain
+                        .as_ref()
+                        .map_or(false, |chain| chain.certificates.contains(&cert_chain))
+                }),
+            "Certificate authority was not correctly deleted"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delete_ctlog() {
+        let cache_dir = None;
+        let mut trust_root = SigstoreTrustRoot::new(cache_dir)
+            .await
+            .expect("Failed to create SigstoreTrustRoot");
+
+        // Add a new ctlog
+        let public_key_raw_bytes=String::from("MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEbfwR+RJudXscgRBRpKX1XFDy3PyudDxz/SfnRi1fT8ekpfBd2O1uoz7jr3Z8nKzxA69EUQ+eFCFI3zeubPWU7w==").as_bytes().to_vec();
+        let new_ctlog = TransparencyLogInstance {
+            base_url: String::from("https://ctfe.sigstore.dev/test"),
+            hash_algorithm: 256,
+            public_key: Some(PublicKey {
+                raw_bytes: Some(public_key_raw_bytes.clone()),
+                key_details: 256,
+                valid_for: Some(TimeRange {
+                    start: Some(Timestamp {
+                        seconds: 1724155691,
+                        nanos: 0,
+                    }),
+                    end: None,
+                }),
+            }),
+            log_id: Some(LogId {
+                key_id: String::from("CGCS8RhS/2hG0drJ4ScRWcYrBY9wzjSbea8IgY2b3I=")
+                    .as_bytes()
+                    .to_vec(),
+            }),
+            checkpoint_key_id: None,
+        };
+
+        let result = trust_root.add_target(TargetType::Log(new_ctlog), Target::Ctlog);
+        assert!(result.is_ok(), "Failed to add new Ctlog entry");
+
+        let public_key = PublicKey {
+            raw_bytes: Some(public_key_raw_bytes),
+            key_details: 256,
+            valid_for: Some(TimeRange {
+                start: Some(Timestamp {
+                    seconds: 1724155691,
+                    nanos: 0,
+                }),
+                end: None,
+            }),
+        };
+        assert!(
+            trust_root.trusted_root.ctlogs.iter().any(|ctlog| {
+                ctlog
+                    .public_key
+                    .as_ref()
+                    .map_or(false, |key| key.raw_bytes == public_key.raw_bytes)
+            }),
+            "Ctlog not found before deletion"
+        );
+
+        // Delete the ctlog by public key raw data
+        let result =
+            trust_root.delete_target(Target::Ctlog, &public_key.raw_bytes.clone().unwrap());
+        assert!(result.is_ok(), "Failed to delete the Ctlog");
+
+        // Verify the ctlog was deleted
+        assert!(
+            !trust_root.trusted_root.ctlogs.iter().any(|ctlog| {
+                ctlog
+                    .public_key
+                    .as_ref()
+                    .map_or(false, |key| key.raw_bytes == public_key.raw_bytes)
+            }),
+            "Ctlog was not correctly deleted"
+        );
     }
 }
