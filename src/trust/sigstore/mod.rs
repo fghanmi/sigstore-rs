@@ -166,6 +166,14 @@ impl SigstoreTrustRoot {
             .map(|cert| cert.raw_bytes.as_slice())
     }
 
+    /// Save the trusted root to a file
+    pub fn save_to_file(&self, file_path: &Path) -> Result<()> {
+        let json = serde_json::to_string(&self.trusted_root)
+            .map_err(|e| SigstoreError::SerializationError(e.to_string()))?;
+
+        std::fs::write(file_path, json).map_err(SigstoreError::from)
+    }
+
     // Add a new target in the TrustedRoot
     pub fn add_target(&mut self, new_target: TargetType, target_name: Target) -> Result<()> {
         match target_name {
