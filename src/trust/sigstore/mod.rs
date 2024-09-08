@@ -178,6 +178,7 @@ impl SigstoreTrustRoot {
         std::fs::write(file_path, json).map_err(SigstoreError::from)
     }
 
+    // Set a target in the TrustedRoot: Add or Update
     pub fn set_target(&mut self, new_target: TargetType, target_name: Target) -> Result<()> {
         match target_name {
             Target::CertificateAuthority => {
@@ -198,7 +199,6 @@ impl SigstoreTrustRoot {
                             .find(|existing_ca| existing_ca.cert_chain == ca.cert_chain)
                         {
                             existing_ca.clone_from(&ca);
-                            println!("Certificate Authority successfully updated!");
                         }
                     } else {
                         // Add the new Certificate Authority if it doesn't exist
@@ -211,7 +211,6 @@ impl SigstoreTrustRoot {
                             }
                         }
                         self.trusted_root.certificate_authorities.push(ca);
-                        println!("Certificate Authority successfully added!");
                     }
                 } else {
                     return Err(SigstoreError::UnexpectedError(
@@ -235,7 +234,6 @@ impl SigstoreTrustRoot {
                             .find(|existing_tsa| existing_tsa.cert_chain == tsa.cert_chain)
                         {
                             existing_tsa.clone_from(&tsa);
-                            println!("Timestamp Authority successfully updated!");
                         }
                     } else {
                         if let Some(last_tsa) = self.trusted_root.timestamp_authorities.last_mut() {
@@ -246,7 +244,6 @@ impl SigstoreTrustRoot {
                             }
                         }
                         self.trusted_root.timestamp_authorities.push(tsa);
-                        println!("Timestamp Authority successfully added!");
                     }
                 } else {
                     return Err(SigstoreError::UnexpectedError(
@@ -269,7 +266,6 @@ impl SigstoreTrustRoot {
                             .find(|existing_ctlog| existing_ctlog.log_id == ctlog.log_id)
                         {
                             existing_ctlog.clone_from(&ctlog);
-                            println!("Ctlog successfully updated!");
                         }
                     } else {
                         if let Some(last_ctlog) = self.trusted_root.ctlogs.last_mut() {
@@ -291,7 +287,6 @@ impl SigstoreTrustRoot {
                             }
                         }
                         self.trusted_root.ctlogs.push(ctlog);
-                        println!("Ctlog successfully added!");
                     }
                 } else {
                     return Err(SigstoreError::UnexpectedError(
@@ -314,7 +309,6 @@ impl SigstoreTrustRoot {
                             .find(|existing_tlog| existing_tlog.log_id == tlog.log_id)
                         {
                             existing_tlog.clone_from(&tlog);
-                            println!("Tlog successfully updated!");
                         }
                     } else {
                         if let Some(last_tlog) = self.trusted_root.tlogs.last_mut() {
@@ -336,220 +330,6 @@ impl SigstoreTrustRoot {
                             }
                         }
                         self.trusted_root.tlogs.push(tlog);
-                        println!("Tlog successfully added!");
-                    }
-                } else {
-                    return Err(SigstoreError::UnexpectedError(
-                        "Expected a Tlog, but got a different target.".to_string(),
-                    ));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    pub fn add_target(&mut self, new_target: TargetType, target_name: Target) -> Result<()> {
-        match target_name {
-            Target::CertificateAuthority => {
-                if let TargetType::Authority(ca) = new_target {
-                    // Check if the Certificate Authority already exists
-                    let exists = self
-                        .trusted_root
-                        .certificate_authorities
-                        .iter()
-                        .any(|existing_ca| existing_ca.cert_chain == ca.cert_chain);
-
-                    // Add the new Certificate Authority only if it doesn't exist
-                    if !exists {
-                        // Expire the last entry if it doesn't have an `end` value
-                        if let Some(last_ca) = self.trusted_root.certificate_authorities.last_mut()
-                        {
-                            if let Some(valid_for) = &mut last_ca.valid_for {
-                                if valid_for.end.is_none() {
-                                    valid_for.end = ca.valid_for.clone().unwrap().start;
-                                }
-                            }
-                        }
-                        self.trusted_root.certificate_authorities.push(ca);
-                    } else {
-                        return Err(SigstoreError::UnexpectedError(
-                            "Certificate Authority already exists.".to_string(),
-                        ));
-                    }
-                } else {
-                    return Err(SigstoreError::UnexpectedError(
-                        "Expected a CertificateAuthority, but got a different target.".to_string(),
-                    ));
-                }
-            }
-            Target::TimestampAuthority => {
-                if let TargetType::Authority(tsa) = new_target {
-                    let exists = self
-                        .trusted_root
-                        .timestamp_authorities
-                        .iter()
-                        .any(|existing_tsa| existing_tsa.cert_chain == tsa.cert_chain);
-
-                    if !exists {
-                        if let Some(last_tsa) = self.trusted_root.timestamp_authorities.last_mut() {
-                            if let Some(valid_for) = &mut last_tsa.valid_for {
-                                if valid_for.end.is_none() {
-                                    valid_for.end = tsa.valid_for.clone().unwrap().start;
-                                }
-                            }
-                        }
-                        self.trusted_root.timestamp_authorities.push(tsa);
-                    } else {
-                        return Err(SigstoreError::UnexpectedError(
-                            "Timestamp Authority already exists.".to_string(),
-                        ));
-                    }
-                } else {
-                    return Err(SigstoreError::UnexpectedError(
-                        "Expected a TimestampAuthority, but got a different target.".to_string(),
-                    ));
-                }
-            }
-            Target::Ctlog => {
-                if let TargetType::Log(ctlog) = new_target {
-                    let exists = self.trusted_root.ctlogs.iter().any(|existing_ctlog| {
-                        existing_ctlog.log_id == ctlog.log_id
-                            || existing_ctlog.public_key == ctlog.public_key
-                    });
-
-                    if !exists {
-                        if let Some(last_ctlog) = self.trusted_root.ctlogs.last_mut() {
-                            if let Some(valid_for) = last_ctlog
-                                .public_key
-                                .as_mut()
-                                .and_then(|pk| pk.valid_for.as_mut())
-                            {
-                                if valid_for.end.is_none() {
-                                    valid_for.end = ctlog
-                                        .clone()
-                                        .public_key
-                                        .unwrap()
-                                        .valid_for
-                                        .clone()
-                                        .unwrap()
-                                        .start;
-                                }
-                            }
-                        }
-                        self.trusted_root.ctlogs.push(ctlog);
-                    } else {
-                        return Err(SigstoreError::UnexpectedError(
-                            "Ctlog already exists.".to_string(),
-                        ));
-                    }
-                } else {
-                    return Err(SigstoreError::UnexpectedError(
-                        "Expected a Ctlog, but got a different target.".to_string(),
-                    ));
-                }
-            }
-            Target::Tlog => {
-                if let TargetType::Log(tlog) = new_target {
-                    let exists = self.trusted_root.tlogs.iter().any(|existing_tlog| {
-                        existing_tlog.log_id == tlog.log_id
-                            || existing_tlog.public_key == tlog.public_key
-                    });
-
-                    if !exists {
-                        if let Some(last_tlog) = self.trusted_root.tlogs.last_mut() {
-                            if let Some(valid_for) = last_tlog
-                                .public_key
-                                .as_mut()
-                                .and_then(|pk| pk.valid_for.as_mut())
-                            {
-                                if valid_for.end.is_none() {
-                                    valid_for.end = tlog
-                                        .clone()
-                                        .public_key
-                                        .unwrap()
-                                        .valid_for
-                                        .clone()
-                                        .unwrap()
-                                        .start;
-                                }
-                            }
-                        }
-                        self.trusted_root.tlogs.push(tlog);
-                    } else {
-                        return Err(SigstoreError::UnexpectedError(
-                            "Tlog already exists.".to_string(),
-                        ));
-                    }
-                } else {
-                    return Err(SigstoreError::UnexpectedError(
-                        "Expected a Tlog, but got a different target.".to_string(),
-                    ));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    // Update a target in the TrustedRoot
-    pub fn update_target(&mut self, target: TargetType, target_name: Target) -> Result<()> {
-        match target_name {
-            Target::CertificateAuthority => {
-                if let TargetType::Authority(new_ca) = target {
-                    if let Some(existing_ca) = self
-                        .trusted_root
-                        .certificate_authorities
-                        .iter_mut()
-                        .find(|ca| ca.cert_chain == new_ca.cert_chain)
-                    {
-                        existing_ca.clone_from(&new_ca);
-                    }
-                } else {
-                    return Err(SigstoreError::UnexpectedError(
-                        "Expected a CertificateAuthority, but got a different target.".to_string(),
-                    ));
-                }
-            }
-            Target::TimestampAuthority => {
-                if let TargetType::Authority(new_tsa) = target {
-                    if let Some(existing_tsa) = self
-                        .trusted_root
-                        .timestamp_authorities
-                        .iter_mut()
-                        .find(|tsa| tsa.cert_chain == new_tsa.cert_chain)
-                    {
-                        existing_tsa.clone_from(&new_tsa);
-                    }
-                } else {
-                    return Err(SigstoreError::UnexpectedError(
-                        "Expected a TimestampAuthority, but got a different target.".to_string(),
-                    ));
-                }
-            }
-            Target::Ctlog => {
-                if let TargetType::Log(new_ctlog) = target {
-                    if let Some(existing_ctlog) = self
-                        .trusted_root
-                        .ctlogs
-                        .iter_mut()
-                        .find(|ctlog| ctlog.log_id == new_ctlog.log_id)
-                    {
-                        existing_ctlog.clone_from(&new_ctlog);
-                    }
-                } else {
-                    return Err(SigstoreError::UnexpectedError(
-                        "Expected a Ctlog, but got a different target.".to_string(),
-                    ));
-                }
-            }
-            Target::Tlog => {
-                if let TargetType::Log(new_tlog) = target {
-                    if let Some(existing_tlog) = self
-                        .trusted_root
-                        .tlogs
-                        .iter_mut()
-                        .find(|tlog| tlog.log_id == new_tlog.log_id)
-                    {
-                        existing_tlog.clone_from(&new_tlog);
                     }
                 } else {
                     return Err(SigstoreError::UnexpectedError(
