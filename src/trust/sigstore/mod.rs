@@ -55,6 +55,10 @@ pub enum Target {
     Tlog,
 }
 impl SigstoreTrustRoot {
+    // Needed to construct SigstoreTrustRoot from trusted_root.json
+    pub fn from_trusted_root(trusted_root: TrustedRoot) -> Self {
+        SigstoreTrustRoot { trusted_root }
+    }
     /// Constructs a new trust root from a [`tough::Repository`].
     async fn from_tough(
         repository: &tough::Repository,
