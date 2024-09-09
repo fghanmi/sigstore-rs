@@ -343,7 +343,7 @@ impl SigstoreTrustRoot {
 
     // Delete a target from the TrustedRoot by its identifier raw bytes:
     // public key for tlogs and ctlogs, cert chain for certificate and timestamp authorities)
-    pub fn delete_target(&mut self, target_type: Target, identifier: &Vec<u8>) -> Result<()> {
+    pub fn delete_target(&mut self, target_type: &Target, identifier: &Vec<u8>) -> Result<()> {
         match target_type {
             Target::CertificateAuthority => {
                 self.trusted_root.certificate_authorities.retain(|ca| {
@@ -791,7 +791,7 @@ mod tests {
         );
 
         // Delete the CertificateAuthority by cert_chain
-        let result = trust_root.delete_target(Target::CertificateAuthority, &cert_chain.raw_bytes);
+        let result = trust_root.delete_target(&Target::CertificateAuthority, &cert_chain.raw_bytes);
         assert!(result.is_ok(), "Failed to delete the certificate authority");
 
         // Verify the CertificateAuthority was deleted
@@ -866,7 +866,7 @@ mod tests {
 
         // Delete the ctlog by public key raw data
         let result =
-            trust_root.delete_target(Target::Ctlog, &public_key.raw_bytes.clone().unwrap());
+            trust_root.delete_target(&Target::Ctlog, &public_key.raw_bytes.clone().unwrap());
         assert!(result.is_ok(), "Failed to delete the Ctlog");
 
         // Verify the ctlog was deleted
