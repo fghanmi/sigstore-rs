@@ -182,7 +182,7 @@ impl SigstoreTrustRoot {
     pub fn set_target(&mut self, new_target: TargetType, target_name: Target) -> Result<()> {
         match target_name {
             Target::CertificateAuthority => {
-                if let TargetType::Authority(ca) = new_target {
+                if let TargetType::Authority(mut ca) = new_target {
                     // Check if the Certificate Authority already exists
                     let exists = self
                         .trusted_root
@@ -198,6 +198,12 @@ impl SigstoreTrustRoot {
                             .iter_mut()
                             .find(|existing_ca| existing_ca.cert_chain == ca.cert_chain)
                         {
+                            // If valid_for.start is not set; User wants  to expire the target
+                            if let Some(valid_for) = &mut ca.valid_for {
+                                if valid_for.start.is_none() {
+                                    valid_for.start = existing_ca.valid_for.clone().unwrap().start;
+                                }
+                            }
                             existing_ca.clone_from(&ca);
                         }
                     } else {
@@ -219,7 +225,7 @@ impl SigstoreTrustRoot {
                 }
             }
             Target::TimestampAuthority => {
-                if let TargetType::Authority(tsa) = new_target {
+                if let TargetType::Authority(mut tsa) = new_target {
                     let exists = self
                         .trusted_root
                         .timestamp_authorities
@@ -233,6 +239,12 @@ impl SigstoreTrustRoot {
                             .iter_mut()
                             .find(|existing_tsa| existing_tsa.cert_chain == tsa.cert_chain)
                         {
+                            // If valid_for.start is not set; User wants  to expire the target
+                            if let Some(valid_for) = &mut tsa.valid_for {
+                                if valid_for.start.is_none() {
+                                    valid_for.start = existing_tsa.valid_for.clone().unwrap().start;
+                                }
+                            }
                             existing_tsa.clone_from(&tsa);
                         }
                     } else {
@@ -252,7 +264,7 @@ impl SigstoreTrustRoot {
                 }
             }
             Target::Ctlog => {
-                if let TargetType::Log(ctlog) = new_target {
+                if let TargetType::Log(mut ctlog) = new_target {
                     let exists = self.trusted_root.ctlogs.iter().any(|existing_ctlog| {
                         existing_ctlog.log_id == ctlog.log_id
                             || existing_ctlog.public_key == ctlog.public_key
@@ -265,6 +277,23 @@ impl SigstoreTrustRoot {
                             .iter_mut()
                             .find(|existing_ctlog| existing_ctlog.log_id == ctlog.log_id)
                         {
+                            // If valid_for.start is not set; User wants  to expire the target
+                            if let Some(valid_for) = &mut ctlog
+                                .public_key
+                                .as_mut()
+                                .and_then(|pk| pk.valid_for.as_mut())
+                            {
+                                if valid_for.start.is_none() {
+                                    valid_for.start = existing_ctlog
+                                        .clone()
+                                        .public_key
+                                        .unwrap()
+                                        .valid_for
+                                        .clone()
+                                        .unwrap()
+                                        .start;
+                                }
+                            }
                             existing_ctlog.clone_from(&ctlog);
                         }
                     } else {
@@ -295,7 +324,7 @@ impl SigstoreTrustRoot {
                 }
             }
             Target::Tlog => {
-                if let TargetType::Log(tlog) = new_target {
+                if let TargetType::Log(mut tlog) = new_target {
                     let exists = self.trusted_root.tlogs.iter().any(|existing_tlog| {
                         existing_tlog.log_id == tlog.log_id
                             || existing_tlog.public_key == tlog.public_key
@@ -308,6 +337,23 @@ impl SigstoreTrustRoot {
                             .iter_mut()
                             .find(|existing_tlog| existing_tlog.log_id == tlog.log_id)
                         {
+                            // If valid_for.start is not set; User wants  to expire the target
+                            if let Some(valid_for) = &mut tlog
+                                .public_key
+                                .as_mut()
+                                .and_then(|pk| pk.valid_for.as_mut())
+                            {
+                                if valid_for.start.is_none() {
+                                    valid_for.start = existing_tlog
+                                        .clone()
+                                        .public_key
+                                        .unwrap()
+                                        .valid_for
+                                        .clone()
+                                        .unwrap()
+                                        .start;
+                                }
+                            }
                             existing_tlog.clone_from(&tlog);
                         }
                     } else {
