@@ -397,7 +397,7 @@ impl SigstoreTrustRoot {
                         chain
                             .certificates
                             .iter()
-                            .any(|cert| cert.raw_bytes != *identifier)
+                            .all(|cert| cert.raw_bytes != *identifier)
                     })
                 });
             }
@@ -407,7 +407,7 @@ impl SigstoreTrustRoot {
                         chain
                             .certificates
                             .iter()
-                            .any(|cert| cert.raw_bytes != *identifier)
+                            .all(|cert| cert.raw_bytes != *identifier)
                     })
                 });
             }
