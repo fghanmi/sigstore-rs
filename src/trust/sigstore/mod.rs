@@ -389,18 +389,30 @@ impl SigstoreTrustRoot {
         Ok(())
     }
 
+    // pub fn is_corrupted_raw_bytes(raw_bytes: &[u8]) -> bool {
+    //     // Try to decode Base64 (old versions stored PEM-encoded raw bytes)
+    //     if let Ok(decoded) = decode(raw_bytes) {
+    //         if let Ok(text) = str::from_utf8(&decoded) {
+    //             // Check for PEM headers in the decoded data
+    //             if text.contains("-----BEGIN") {
+    //                 return true; // This means it was stored incorrectly!
+    //             }
+    //         }
+    //     }
+    
+    //     // If we failed to decode it as Base64, assume it's valid DER
+    //     false
+    // }
+
     pub fn is_corrupted_raw_bytes(raw_bytes: &[u8]) -> bool {
-        // Try to decode Base64 (old versions stored PEM-encoded raw bytes)
-        if let Ok(decoded) = decode(raw_bytes) {
-            if let Ok(text) = str::from_utf8(&decoded) {
-                // Check for PEM headers in the decoded data
-                if text.contains("-----BEGIN") {
-                    return true; // This means it was stored incorrectly!
-                }
+        // Check if raw_bytes contains ASCII PEM headers (this means it’s incorrect)
+        if let Ok(text) = str::from_utf8(raw_bytes) {
+            if text.contains("-----BEGIN") {
+                return true; // Old buggy format detected!
             }
         }
     
-        // If we failed to decode it as Base64, assume it's valid DER
+        // If it's not valid DER, assume it's incorrect
         false
     }
 
