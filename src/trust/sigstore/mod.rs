@@ -182,6 +182,57 @@ impl SigstoreTrustRoot {
 
     // Set a target in the TrustedRoot: Add or Update
     pub fn set_target(&mut self, new_target: TargetType, target_name: Target) -> Result<()> {
+
+        // Step 1: Remove all corrupted targets of the given type
+        match target_name {
+            Target::CertificateAuthority => {
+                self.trusted_root.certificate_authorities.retain(|ca| {
+                    ca.cert_chain.as_ref().map_or(true, |chain| {
+                        let clean_certs: Vec<_> = chain.certificates.iter()
+                            .filter(|cert| {
+                                let corrupted = SigstoreTrustRoot::is_corrupted_raw_bytes(&cert.raw_bytes);
+                                !corrupted
+                            })
+                            .cloned()
+                            .collect();
+    
+                        !clean_certs.is_empty() // Keep only valid CAs
+                    })
+                });
+            }
+            Target::TimestampAuthority => {
+                self.trusted_root.timestamp_authorities.retain(|tsa| {
+                    tsa.cert_chain.as_ref().map_or(true, |chain| {
+                        let clean_certs: Vec<_> = chain.certificates.iter()
+                            .filter(|cert| {
+                                let corrupted = SigstoreTrustRoot::is_corrupted_raw_bytes(&cert.raw_bytes);
+                                !corrupted
+                            })
+                            .cloned()
+                            .collect();
+    
+                        !clean_certs.is_empty()
+                    })
+                });
+            }
+            Target::Ctlog => {
+                self.trusted_root.ctlogs.retain(|ctlog| {
+                    let corrupted = ctlog.public_key.as_ref().map_or(false, |key| {
+                        key.raw_bytes.as_ref().map_or(false, |rb| SigstoreTrustRoot::is_corrupted_raw_bytes(rb))
+                    });
+                    !corrupted
+                });
+            }
+            Target::Tlog => {
+                self.trusted_root.tlogs.retain(|tlog| {
+                    let corrupted = tlog.public_key.as_ref().map_or(false, |key| {
+                        key.raw_bytes.as_ref().map_or(false, |rb| SigstoreTrustRoot::is_corrupted_raw_bytes(rb))
+                    });
+                    !corrupted
+                });
+            }
+        }
+
         match target_name {
             Target::CertificateAuthority => {
                 if let TargetType::Authority(mut ca) = new_target {
@@ -389,30 +440,12 @@ impl SigstoreTrustRoot {
         Ok(())
     }
 
-    // pub fn is_corrupted_raw_bytes(raw_bytes: &[u8]) -> bool {
-    //     // Try to decode Base64 (old versions stored PEM-encoded raw bytes)
-    //     if let Ok(decoded) = decode(raw_bytes) {
-    //         if let Ok(text) = str::from_utf8(&decoded) {
-    //             // Check for PEM headers in the decoded data
-    //             if text.contains("-----BEGIN") {
-    //                 return true; // This means it was stored incorrectly!
-    //             }
-    //         }
-    //     }
-    
-    //     // If we failed to decode it as Base64, assume it's valid DER
-    //     false
-    // }
-
     pub fn is_corrupted_raw_bytes(raw_bytes: &[u8]) -> bool {
-        // Check if raw_bytes contains ASCII PEM headers (this means it’s incorrect)
         if let Ok(text) = str::from_utf8(raw_bytes) {
             if text.contains("-----BEGIN") {
-                return true; // Old buggy format detected!
+                return true;
             }
         }
-    
-        // If it's not valid DER, assume it's incorrect
         false
     }
 
@@ -427,9 +460,6 @@ impl SigstoreTrustRoot {
                         let clean_certs: Vec<_> = chain.certificates.iter()
                             .filter(|cert| {
                                 let corrupted = SigstoreTrustRoot::is_corrupted_raw_bytes(&cert.raw_bytes);
-                                if corrupted {
-                                    println!("Removing corrupted CA target: {:?}", cert.raw_bytes);
-                                }
                                 !corrupted
                             })
                             .cloned()
@@ -445,9 +475,6 @@ impl SigstoreTrustRoot {
                         let clean_certs: Vec<_> = chain.certificates.iter()
                             .filter(|cert| {
                                 let corrupted = SigstoreTrustRoot::is_corrupted_raw_bytes(&cert.raw_bytes);
-                                if corrupted {
-                                    println!("Removing corrupted TSA target: {:?}", cert.raw_bytes);
-                                }
                                 !corrupted
                             })
                             .cloned()
@@ -462,11 +489,6 @@ impl SigstoreTrustRoot {
                     let corrupted = ctlog.public_key.as_ref().map_or(false, |key| {
                         key.raw_bytes.as_ref().map_or(false, |rb| SigstoreTrustRoot::is_corrupted_raw_bytes(rb))
                     });
-    
-                    if corrupted {
-                        println!("Removing corrupted Ctlog target: {:?}", ctlog.public_key);
-                    }
-    
                     !corrupted
                 });
             }
@@ -475,11 +497,6 @@ impl SigstoreTrustRoot {
                     let corrupted = tlog.public_key.as_ref().map_or(false, |key| {
                         key.raw_bytes.as_ref().map_or(false, |rb| SigstoreTrustRoot::is_corrupted_raw_bytes(rb))
                     });
-    
-                    if corrupted {
-                        println!("Removing corrupted Tlog target: {:?}", tlog.public_key);
-                    }
-    
                     !corrupted
                 });
             }
