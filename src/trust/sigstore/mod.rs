@@ -37,6 +37,8 @@ mod constants;
 
 use crate::errors::{Result, SigstoreError};
 pub use crate::trust::{ManualTrustRoot, TrustRoot};
+use base64::decode;
+use std::str;
 
 /// Securely fetches Rekor public key and Fulcio certificates from Sigstore's TUF repository.
 #[derive(Debug)]
@@ -387,46 +389,117 @@ impl SigstoreTrustRoot {
         Ok(())
     }
 
+    pub fn is_corrupted_raw_bytes(raw_bytes: &[u8]) -> bool {
+        // Try to decode Base64 (old versions stored PEM-encoded raw bytes)
+        if let Ok(decoded) = decode(raw_bytes) {
+            if let Ok(text) = str::from_utf8(&decoded) {
+                // Check for PEM headers in the decoded data
+                if text.contains("-----BEGIN") {
+                    return true; // This means it was stored incorrectly!
+                }
+            }
+        }
+    
+        // If we failed to decode it as Base64, assume it's valid DER
+        false
+    }
+
     // Delete a target from the TrustedRoot by its identifier raw bytes:
     // public key for tlogs and ctlogs, cert chain for certificate and timestamp authorities)
     pub fn delete_target(&mut self, target_type: &Target, identifier: &Vec<u8>) -> Result<()> {
+        // Step 1: Remove all corrupted targets of the given type
         match target_type {
             Target::CertificateAuthority => {
                 self.trusted_root.certificate_authorities.retain(|ca| {
                     ca.cert_chain.as_ref().map_or(true, |chain| {
-                        chain
-                            .certificates
-                            .iter()
-                            .all(|cert| cert.raw_bytes != *identifier)
+                        let clean_certs: Vec<_> = chain.certificates.iter()
+                            .filter(|cert| {
+                                let corrupted = SigstoreTrustRoot::is_corrupted_raw_bytes(&cert.raw_bytes);
+                                if corrupted {
+                                    println!("Removing corrupted CA target: {:?}", cert.raw_bytes);
+                                }
+                                !corrupted
+                            })
+                            .cloned()
+                            .collect();
+    
+                        !clean_certs.is_empty() // Keep only valid CAs
                     })
                 });
             }
             Target::TimestampAuthority => {
                 self.trusted_root.timestamp_authorities.retain(|tsa| {
                     tsa.cert_chain.as_ref().map_or(true, |chain| {
-                        chain
-                            .certificates
-                            .iter()
-                            .all(|cert| cert.raw_bytes != *identifier)
+                        let clean_certs: Vec<_> = chain.certificates.iter()
+                            .filter(|cert| {
+                                let corrupted = SigstoreTrustRoot::is_corrupted_raw_bytes(&cert.raw_bytes);
+                                if corrupted {
+                                    println!("Removing corrupted TSA target: {:?}", cert.raw_bytes);
+                                }
+                                !corrupted
+                            })
+                            .cloned()
+                            .collect();
+    
+                        !clean_certs.is_empty()
                     })
                 });
             }
             Target::Ctlog => {
                 self.trusted_root.ctlogs.retain(|ctlog| {
-                    ctlog
-                        .public_key
-                        .as_ref()
-                        .map_or(true, |key| key.raw_bytes != Some(identifier.clone()))
+                    let corrupted = ctlog.public_key.as_ref().map_or(false, |key| {
+                        key.raw_bytes.as_ref().map_or(false, |rb| SigstoreTrustRoot::is_corrupted_raw_bytes(rb))
+                    });
+    
+                    if corrupted {
+                        println!("Removing corrupted Ctlog target: {:?}", ctlog.public_key);
+                    }
+    
+                    !corrupted
                 });
             }
             Target::Tlog => {
                 self.trusted_root.tlogs.retain(|tlog| {
-                    tlog.public_key
-                        .as_ref()
-                        .map_or(true, |key| key.raw_bytes != Some(identifier.clone()))
+                    let corrupted = tlog.public_key.as_ref().map_or(false, |key| {
+                        key.raw_bytes.as_ref().map_or(false, |rb| SigstoreTrustRoot::is_corrupted_raw_bytes(rb))
+                    });
+    
+                    if corrupted {
+                        println!("Removing corrupted Tlog target: {:?}", tlog.public_key);
+                    }
+    
+                    !corrupted
                 });
             }
         }
+    
+        // Step 2: Proceed with normal deletion after cleanup
+        match target_type {
+            Target::CertificateAuthority => {
+                self.trusted_root.certificate_authorities.retain(|ca| {
+                    ca.cert_chain.as_ref().map_or(true, |chain| {
+                        chain.certificates.iter().all(|cert| cert.raw_bytes != *identifier)
+                    })
+                });
+            }
+            Target::TimestampAuthority => {
+                self.trusted_root.timestamp_authorities.retain(|tsa| {
+                    tsa.cert_chain.as_ref().map_or(true, |chain| {
+                        chain.certificates.iter().all(|cert| cert.raw_bytes != *identifier)
+                    })
+                });
+            }
+            Target::Ctlog => {
+                self.trusted_root.ctlogs.retain(|ctlog| {
+                    ctlog.public_key.as_ref().map_or(true, |key| key.raw_bytes != Some(identifier.clone()))
+                });
+            }
+            Target::Tlog => {
+                self.trusted_root.tlogs.retain(|tlog| {
+                    tlog.public_key.as_ref().map_or(true, |key| key.raw_bytes != Some(identifier.clone()))
+                });
+            }
+        }    
         Ok(())
     }
 }
